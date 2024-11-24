@@ -1,41 +1,114 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0" >
-<link rel="stylesheet" href="style.css">
-<title>insta</title>
-</head>
-<body>
-    <div class="instagram-wrapper">
-        <div class="instagran-celular">
-            <img src="imagemstrab/instagram-celular.png" alt="celular">
-        </div>
-        <div class="instagran-continue">
-          <div class="gruop">
-            <img src="imagemstrab/instagram-logo.png" class="instagram-logo" alt="instagram logo">
-            <div class="profile-poto" >
-                <img src="imagemstrab/jhb.png" alt="foto de perfil">
-            </div>
-            <a href="#" class="instagram-login"> Continue como batata comunista</a> 
-            <a href="#" class="instagram-logout"> saia da conta </a>
-           </div>
-           <div class="gruop">
-            <p class="not-account"> não es batata?</p>
-            <p class="notaccount">
-                <span class="link-blue"> alterar contas </span>
-                ou
-                <span class="link-blue"> inscreva-se </span>
-            </p>
-           </div>
-           <div class="get-the-app">
-             <p class="get-app">baixe o aplicativo</p>
-             <div class="download">
-                <a href="#" class="app-download"></a>
-                <a href="#"  class="app-download"></a>
-             </div>
-           </div>
-        </div> 
-    </div>
-</body>
-</html>
+import streamlit as st
+import firebase_admin
+from firebase_admin import credentials, auth
+import pandas as pd
+
+# Inicializar Firebase Admin SDK
+if not firebase_admin._apps:
+    cred = credentials.Certificate("firebase-adminsdk.json")
+    firebase_admin.initialize_app(cred)
+
+# Função para autenticar usuário
+def autenticar_usuario(email, senha):
+    try:
+        # Usar o Firebase Authentication para verificar o e-mail e senha
+        user = auth.get_user_by_email(email)
+        # Aqui simulamos a verificação da senha (Firebase Admin não expõe autenticação direta de senha)
+        # Em produção, utilize Firebase Client SDK para login real com senha
+        if senha == user.custom_claims.get("senha"):  # Simulação de autenticação
+            return user
+        else:
+            return None
+    except firebase_admin.auth.AuthError:
+        return None
+
+# Função para criar usuários (apenas administradores podem usar)
+def criar_usuario(email, senha):
+    try:
+        user = auth.create_user(email=email)
+        auth.set_custom_user_claims(user.uid, {"senha": senha})
+        st.success(f"Usuário {email} criado com sucesso!")
+    except Exception as e:
+        st.error(f"Erro ao criar usuário: {e}")
+
+# Função para exibir a tela de login
+def exibir_tela_login():
+    st.title("Login no Gerenciador de Vendas 🛒")
+    email = st.text_input("E-mail")
+    senha = st.text_input("Senha", type="password")
+    if st.button("Login"):
+        user = autenticar_usuario(email, senha)
+        if user:
+            st.session_state.logado = True
+            st.session_state.email = email
+            st.success("Login bem-sucedido!")
+        else:
+            st.error("E-mail ou senha inválidos. Tente novamente.")
+
+# Função para exibir o painel principal
+def exibir_painel():
+    st.sidebar.title("Menu")
+    menu = st.sidebar.radio("Selecione uma opção", ["Estoque", "Criar/Remover Produto", "Editar Produto", "Gerenciar Estoque"])
+    
+    # Dados simulados
+    if "produtos" not in st.session_state:
+        st.session_state.produtos = pd.DataFrame(columns=["Produto", "Preço", "Quantidade"])
+
+    # Funções do painel
+    if menu == "Estoque":
+        st.subheader("Estoque Atual")
+        st.write(st.session_state.produtos)
+
+    elif menu == "Criar/Remover Produto":
+        st.subheader("Criar ou Remover Produtos")
+        escolha = st.radio("Escolha uma ação:", ["Criar Produto", "Remover Produto"])
+        if escolha == "Criar Produto":
+            nome = st.text_input("Nome do Produto")
+            preco = st.number_input("Preço do Produto (R$)", min_value=0.01, step=0.01)
+            quantidade = st.number_input("Quantidade Inicial", min_value=0, step=1)
+            if st.button("Adicionar Produto"):
+                novo_produto = {"Produto": nome, "Preço": preco, "Quantidade": quantidade}
+                st.session_state.produtos = pd.concat(
+                    [st.session_state.produtos, pd.DataFrame([novo_produto])],
+                    ignore_index=True
+                )
+                st.success("Produto adicionado com sucesso!")
+        elif escolha == "Remover Produto":
+            produto = st.selectbox("Selecione o Produto", st.session_state.produtos["Produto"])
+            if st.button("Remover Produto"):
+                st.session_state.produtos = st.session_state.produtos[st.session_state.produtos["Produto"] != produto]
+                st.success("Produto removido com sucesso!")
+
+    elif menu == "Editar Produto":
+        st.subheader("Editar Produto")
+        produto = st.selectbox("Selecione o Produto", st.session_state.produtos["Produto"])
+        novo_preco = st.number_input("Novo Preço (R$)", min_value=0.01, step=0.01)
+        if st.button("Atualizar Preço"):
+            st.session_state.produtos.loc[st.session_state.produtos["Produto"] == produto, "Preço"] = novo_preco
+            st.success("Preço atualizado com sucesso!")
+
+    elif menu == "Gerenciar Estoque":
+        st.subheader("Gerenciar Estoque")
+        produto = st.selectbox("Selecione o Produto", st.session_state.produtos["Produto"])
+        quantidade = st.number_input("Quantidade a Adicionar/Remover", step=1, format="%d", value=0)
+        acao = st.radio("Ação", ["Adicionar", "Remover"])
+        if st.button("Atualizar Estoque"):
+            if acao == "Adicionar":
+                st.session_state.produtos.loc[st.session_state.produtos["Produto"] == produto, "Quantidade"] += quantidade
+                st.success("Estoque atualizado com sucesso!")
+            elif acao == "Remover":
+                estoque_atual = st.session_state.produtos.loc[st.session_state.produtos["Produto"] == produto, "Quantidade"].values[0]
+                if quantidade > estoque_atual:
+                    st.error("Não é possível remover mais do que o disponível!")
+                else:
+                    st.session_state.produtos.loc[st.session_state.produtos["Produto"] == produto, "Quantidade"] -= quantidade
+                    st.success("Estoque atualizado com sucesso!")
+
+# Controle de login
+if "logado" not in st.session_state:
+    st.session_state.logado = False
+
+if not st.session_state.logado:
+    exibir_tela_login()
+else:
+    exibir_painel()
